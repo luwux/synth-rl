@@ -103,6 +103,8 @@ scripts/run_all.sh --model Qwen/Qwen2.5-Omni-3B --gpus 1 --hours 4 -- --blind
 
 Behind a restricted network, point the downloads at mirrors first, for example `export HF_ENDPOINT=https://hf-mirror.com UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`, or pass a local model folder as `--model`.
 
+If a run fails or stalls, `scripts/doctor.sh runs/<name>` collects the GPUs, driver, packages, network, and log tails into `runs/<name>/doctor.txt`. [AGENTS.md](AGENTS.md) lists the log files, common failures, and their fixes, for a person or a coding agent.
+
 Estimated memory per GPU (not yet measured on CUDA):
 
 - **Qwen2.5-Omni-7B (bf16, LoRA, gradient checkpointing):** about 40 GB with the default batch sizes.

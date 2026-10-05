@@ -77,7 +77,9 @@ fi
 
 if [ "$PREFLIGHT" = 1 ]; then
   step "3/4 preflight on $GPUS GPU(s)"
-  $PY -m synth_rl.preflight --model "$MODEL_DIR" --gpus "$GPUS" --out "$RUN/preflight" 2>&1 | tee "$RUN/preflight.log"
+  if ! $PY -m synth_rl.preflight --model "$MODEL_DIR" --gpus "$GPUS" --out "$RUN/preflight" 2>&1 | tee "$RUN/preflight.log"; then
+    echo "preflight failed; scripts/doctor.sh $RUN collects the details (see AGENTS.md)"; exit 1
+  fi
 fi
 
 step "4/4 training"
@@ -91,4 +93,5 @@ else
   echo "  metrics:   $RUN/train/log.jsonl   samples: $RUN/train/samples.jsonl"
   echo "  results:   $RUN/results.tar.gz when finished"
   echo "  resume after a crash or reboot: scripts/train.sh ${cmd[*]:1}"
+  echo "  diagnose a failure: scripts/doctor.sh $RUN"
 fi
