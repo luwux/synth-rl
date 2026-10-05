@@ -50,6 +50,17 @@ RUN=runs/$NAME
 mkdir -p "$RUN"
 step() { echo; echo "== $* ($(date +%H:%M:%S))"; }
 
+# Behind a restricted network, switch to mirrors unless an index or endpoint was chosen already.
+reachable() { curl -s -o /dev/null -m 8 "$1"; }
+if [ -z "${HF_ENDPOINT:-}" ] && ! reachable https://huggingface.co; then
+  export HF_ENDPOINT=https://hf-mirror.com
+  echo "huggingface.co unreachable; downloading models from $HF_ENDPOINT"
+fi
+if [ -z "${UV_DEFAULT_INDEX:-}${PIP_INDEX_URL:-}" ] && ! reachable https://pypi.org/simple/; then
+  export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+  echo "pypi.org unreachable; installing packages from $UV_DEFAULT_INDEX"
+fi
+
 step "1/4 environment"
 if ! command -v uv >/dev/null; then
   # pip follows PIP_INDEX_URL mirrors; the official installer downloads from GitHub
@@ -61,10 +72,19 @@ fi
 uv pip install --python .venv/bin/python -e ".[train]"
 PY=.venv/bin/python
 $PY -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'gpus', torch.cuda.device_count())"
-if command -v nvidia-smi >/dev/null && ! $PY -c "import torch, sys; sys.exit(not torch.cuda.is_available())"; then
-  echo "nvidia-smi sees GPUs but PyTorch cannot use them; the NVIDIA driver is probably older than this PyTorch build needs:"
+cuda_ok() { $PY -c "import torch, sys; sys.exit(not torch.cuda.is_available())"; }
+if command -v nvidia-smi >/dev/null && ! cuda_ok; then
+  # The PyPI build bundles CUDA 13 and needs NVIDIA driver 580 or newer; the CUDA 12.6 build runs on 525 and newer.
+  TORCH_INDEX=${TORCH_INDEX:-https://download.pytorch.org/whl/cu126}
+  echo "nvidia-smi sees GPUs but PyTorch cannot use them; the NVIDIA driver is probably older than its CUDA build needs."
   nvidia-smi | head -4
-  exit 1
+  echo "installing the same PyTorch built for ${TORCH_INDEX##*/}"
+  read -r TV VV < <($PY -c "from importlib.metadata import version as v; print(v('torch').split('+')[0], v('torchvision').split('+')[0])")
+  uv pip install --python $PY --extra-index-url "$TORCH_INDEX" "torch==$TV+${TORCH_INDEX##*/}" "torchvision==$VV+${TORCH_INDEX##*/}"
+  if ! cuda_ok; then
+    echo "PyTorch still cannot use the GPUs; update the NVIDIA driver, or set TORCH_INDEX to another build"
+    exit 1
+  fi
 fi
 
 step "2/4 model $MODEL"

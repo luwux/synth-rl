@@ -34,8 +34,8 @@ A healthy run has `valid` near 1, `skipped_groups` well below 0.5, and evaluatio
 
 | Symptom | Likely cause and fix |
 | --- | --- |
-| Downloads hang or fail (uv, Python, PyPI, Hugging Face) | Restricted network. Set mirrors before running: `HF_ENDPOINT`, `UV_DEFAULT_INDEX`, `PIP_INDEX_URL` (see README). Or download the model separately and pass its folder as `--model`. |
-| "nvidia-smi sees GPUs but PyTorch cannot use them" | The NVIDIA driver is older than this PyTorch build needs. Update the driver, or install the same torch version built for an older CUDA from the PyTorch package index into `.venv`. |
+| Downloads hang or fail (uv, Python, PyPI, Hugging Face) | Restricted network. `run_all.sh` switches to mirrors when huggingface.co or pypi.org cannot be reached at all; when they are only slow, set mirrors before running: `HF_ENDPOINT`, `UV_DEFAULT_INDEX`, `PIP_INDEX_URL` (see README). Or download the model separately and pass its folder as `--model`. |
+| "nvidia-smi sees GPUs but PyTorch cannot use them" | The PyPI build of PyTorch bundles CUDA 13 and needs NVIDIA driver 580 or newer. `run_all.sh` then installs the CUDA 12.6 build (driver 525 or newer) by itself; if that fails too, update the driver or set `TORCH_INDEX` to another build from download.pytorch.org. |
 | `out of memory, retrying with ...` in the log | Expected: training halves `--gen-batch` or `--micro-batch` and retries. Only a failure at batch size 1 means the model does not fit; use larger cards or a smaller model, or lower `--max-new-tokens`. |
 | Multi-GPU start hangs or fails in NCCL | Check that `--gpus 1` works. Then try `NCCL_P2P_DISABLE=1` or `NCCL_IB_DISABLE=1`. |
 | Preflight "replies parse as edits" fails | Incomplete or wrong model download; check `models/<name>`. |
