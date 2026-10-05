@@ -113,6 +113,11 @@ def completion_mask(ids: torch.Tensor, stop_ids: list[int]) -> torch.Tensor:
     return (~ended_before).float()
 
 
+def fit(x: torch.Tensor, n: int, value) -> torch.Tensor:
+    """Cut or right-pad a 1-D tensor to length n (completions from separate generate calls differ in length)."""
+    return x[:n] if len(x) >= n else torch.nn.functional.pad(x, (0, n - len(x)), value=value)
+
+
 def token_logprobs(policy: OmniPolicy, texts: list[str], clips: list[np.ndarray], comp: torch.Tensor,
                    mask: torch.Tensor) -> torch.Tensor:
     """Log-probability of each completion token given its prompt, shape (n, completion length)."""
@@ -344,8 +349,8 @@ def train(args) -> None:
                 for i in range(0, len(live), args.micro_batch):
                     idx = live[i:i + args.micro_batch]
                     width = int(max(masks[j].sum() for j in idx))
-                    comp = torch.stack([comps[j][:width] for j in idx]).to(policy.device)
-                    mask = torch.stack([masks[j][:width] for j in idx]).to(policy.device)
+                    comp = torch.stack([fit(comps[j], width, policy.stop_ids[0]) for j in idx]).to(policy.device)
+                    mask = torch.stack([fit(masks[j], width, 0.0) for j in idx]).to(policy.device)
                     texts_mb, clips_mb = prompts.select([order[j] for j in idx])
                     logp = token_logprobs(policy, texts_mb, clips_mb, comp, mask)
                     a = adv[idx].to(policy.device).unsqueeze(1)
