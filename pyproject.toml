@@ -1,0 +1,33 @@
+[project]
+name = "synth-rl"
+version = "0.0.1"
+description = "Audio-LLM agents that program the Vital synthesizer from natural language or a reference sound, with a benchmark and RL training scored on the rendered audio"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+dependencies = ["vita>=0.1.0", "numpy", "scipy", "soundfile"]
+
+[project.optional-dependencies]
+# Local Qwen Omni agents and GRPO training. Versions are the ones the recipe was tested with.
+train = [
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "transformers==5.18.0",
+    "peft==0.21.2",
+    "accelerate==1.15.0",
+    "huggingface_hub==1.33.0",
+    "safetensors>=0.8.0",
+    "pillow",
+]
+
+[project.scripts]
+synth-rl = "synth_rl.cli:main"
+synth-rl-grpo = "synth_rl.grpo:main"
+synth-rl-preflight = "synth_rl.preflight:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["synth_rl"]

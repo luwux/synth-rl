@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+outputs/
+data/
+*.vital
+*.wav
+.env
+runs/
+models/
+*.egg-info/
+NOTES.md
