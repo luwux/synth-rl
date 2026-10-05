@@ -21,6 +21,7 @@ import os
 import random
 import shutil
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
@@ -137,8 +138,15 @@ def setup_dist() -> tuple[int, int, str | None]:
         return 0, 1, None
     local = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local)
-    dist.init_process_group("nccl")
+    # Ranks wait for each other once per step; out-of-memory retries on one rank can take a while.
+    dist.init_process_group("nccl", timeout=timedelta(minutes=30))
     return dist.get_rank(), dist.get_world_size(), f"cuda:{local}"
+
+
+def is_oom(e: BaseException) -> bool:
+    """CUDA out-of-memory, including cuBLAS/cuDNN allocation failures that arrive as a plain RuntimeError."""
+    return isinstance(e, torch.OutOfMemoryError) or any(
+        s in str(e) for s in ("out of memory", "CUBLAS_STATUS_ALLOC_FAILED", "CUDNN_STATUS_ALLOC_FAILED"))
 
 
 def all_sum(values: list[float], world: int, device) -> list[float]:
@@ -174,8 +182,8 @@ def evaluate(policy, env, pool, tasks, rank, world, batch, mute=False, blind=Fal
         try:
             texts, _, _ = policy.generate(*prompts.select(list(range(len(chunk)))),
                                           max_new_tokens=max_new_tokens, sample=False)
-        except torch.OutOfMemoryError:
-            if batch == 1:
+        except RuntimeError as e:
+            if not is_oom(e) or batch == 1:
                 raise
             batch //= 2
             continue
@@ -224,6 +232,8 @@ def train(args) -> None:
     from peft import LoraConfig, get_peft_model
 
     rank, world, device = setup_dist()
+    if args.reward_workers is None:  # half the CPU cores, shared by all ranks
+        args.reward_workers = max(2, min(16, (os.cpu_count() or 4) // 2 // world))
     out = Path(args.out)
     ckpt_dir = out / "ckpt"
     if rank == 0:
@@ -320,8 +330,8 @@ def train(args) -> None:
                     comps += list(c_ids.cpu())
                     masks += list(completion_mask(c_ids, policy.stop_ids).cpu())
                 break
-            except torch.OutOfMemoryError:
-                if not shrink("gen_batch"):
+            except RuntimeError as e:
+                if not is_oom(e) or not shrink("gen_batch"):
                     raise
         t_gen = time.time() - t0
 
@@ -365,9 +375,9 @@ def train(args) -> None:
                     loss.backward()
                     loss_sum += loss.item()
                 break
-            except torch.OutOfMemoryError:
+            except RuntimeError as e:
                 logp = per_token = loss = None
-                if not shrink("micro_batch"):
+                if not is_oom(e) or not shrink("micro_batch"):
                     raise
         if world > 1:
             for p in params:
@@ -447,7 +457,7 @@ def main() -> None:
                    help="divide advantages by the group std (GRPO); --no-scale-std keeps raw differences")
     p.add_argument("--max-grad-norm", type=float, default=1.0)
     p.add_argument("--grad-checkpointing", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--reward-workers", type=int, default=max(1, min(16, (os.cpu_count() or 2) // 2)))
+    p.add_argument("--reward-workers", type=int, default=None, help="render processes per rank (default: half the cores, split over ranks)")
     p.add_argument("--eval-every", type=int, default=25)
     p.add_argument("--eval-n", type=int, default=64)
     p.add_argument("--eval-batch", type=int, default=16)

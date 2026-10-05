@@ -33,7 +33,7 @@ The benchmark and the training run on generated tasks:
 1. **Starting sound.** By default each task starts from a procedurally generated patch (random oscillators, filter, envelopes, envelope-to-cutoff modulation, and effects, built from Vital's init preset), so no third-party presets are needed and renders are bit-exact. Any folder of `.vital` presets works too.
 2. **Task.** There are three kinds:
    - **edit:** the patch and an instruction it can still satisfy (a sound that is already fully dry gets no "make it drier").
-   - **repair:** 2–4 parameters of the patch are randomized; the agent hears the broken sound and the original and must restore it.
+   - **repair:** 2–4 parameters of the patch take values from another generated patch (so they look no less plausible than the rest, and the change is always audible); the agent hears the broken sound and the original and must restore it.
    - **match:** the agent starts from Vital's init patch, hears the target, and must rebuild it from scratch. Every procedural target is reachable exactly through the editable controls (a preflight check rebuilds targets from their values).
 3. **Observation.** The agent sees 36 curated controls (oscillators, filter, envelopes, the envelope-to-cutoff amount, effects) with their normalized 0–1 values and Vital's display text, the instruction, and the rendered audio (plus the target for repair and match). In the **blind** variant the current values are hidden, so the agent has to infer them by listening.
 4. **Action.** JSON edits: `{"edits": {"filter_1_cutoff": 0.8}, "reason": "..."}`.
@@ -94,7 +94,7 @@ Benchmark an adapter with `--agents <model>::<adapter dir>`.
    - the model's replies parse;
    - two training steps on every GPU, a resume, and a benchmark of the saved adapter.
 4. Starts training in the background. On errors it restarts from the last checkpoint until the time budget is used.
-5. Benchmarks the keyword baseline, the base model, and the adapter on fixed edit, repair, and match sets, with and without audio, spread over the GPUs, and packs logs, adapters, and benchmark results into `runs/<name>/results.tar.gz`. The last hour of the budget is kept for this (`EVAL_RESERVE`, in seconds).
+5. Benchmarks the keyword baseline, the base model, and the adapter on fixed edit, repair, and match sets, with and without audio, spread over the GPUs, and packs logs, adapters, and benchmark results into `runs/<name>/results.tar.gz`. The last 1.5 hours of the budget are kept for this (`EVAL_RESERVE`, in seconds). `--hours` counts from the start of the command, so installation, download, and preflight count against it.
 
 ```sh
 scripts/run_all.sh --model Qwen/Qwen2.5-Omni-7B --hours 20

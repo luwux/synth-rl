@@ -13,6 +13,7 @@ It installs the environment, downloads the model, runs the preflight checks (`sy
 - Start it inside `tmux` or `screen`: the preflight runs in the foreground and dies with the SSH session. Training then continues in the background.
 - On Slurm, run `scripts/run_all.sh ... --foreground` inside the job; background processes are killed when the allocation ends.
 - To split one machine into two runs, give each its own cards: `CUDA_VISIBLE_DEVICES=0,1,2,3 scripts/run_all.sh ...`.
+- To stop a run, kill the restart loop before its processes, or it starts training again: `pkill -f "train.sh .*runs/<name> "; pkill -f runs/<name>/`.
 - After a crash or reboot, resume with the `scripts/train.sh ...` command that `run_all.sh` printed; it continues from `runs/<name>/train/ckpt/latest`.
 - Memory per GPU (estimates; not yet measured on CUDA): Qwen3-Omni-30B-A3B needs 80 GB cards; Qwen2.5-Omni-7B about 40 GB; Qwen2.5-Omni-3B fits 24 GB with smaller batches. Disk: about 100 GB for the 30B model (66 GB of weights plus the CUDA environment and checkpoints), about 35 GB for 7B.
 

@@ -2,8 +2,8 @@
 
 Edit task: natural-language instruction; reward from the signed change of target descriptors,
 minus drift in descriptors the instruction did not ask to change.
-Repair task: a preset with a few parameters randomized; reward from how much closer the render
-gets to the original preset's render.
+Repair task: a preset with a few parameters replaced by values from another patch; reward from how much
+closer the render gets to the original preset's render.
 Match task: rebuild a target sound from the init patch (sound matching from scratch); same reward as repair.
 """
 
@@ -114,11 +114,26 @@ def make_edit_task(env: VitalEnv, state: str, rng: random.Random, specs: list[st
     return Task("edit", state, rng.choice(EDIT_SPECS[spec_id]["phrases"]), spec_id=spec_id)
 
 
-def make_repair_task(env: VitalEnv, state: str, rng: random.Random, k: tuple[int, int] = (2, 4)) -> Task:
+def make_repair_task(env: VitalEnv, state: str, rng: random.Random, k: tuple[int, int] = (2, 4),
+                     min_dist: float = 0.1, attempts: int = 20) -> Task | None:
+    """Copy 2-4 values from another procedural patch, so the broken values look no less plausible than the
+    rest (no text-only shortcut), and retry until the change is audible (an inaudible change makes every
+    edit score -1). min_dist is about the distance of a small level change."""
+    from .procedural import random_patch
+
+    target = env.render(state)
     env.load_state(state)
-    names = rng.sample(sorted(EDITABLE), rng.randint(*k))
-    env.apply({n: rng.random() for n in names})
-    return Task("repair", env.state, REPAIR_INSTRUCTION, target_state=state, perturbed=names)
+    current = env.values()
+    for _ in range(attempts):
+        env.load_state(random_patch(env, rng))
+        donor = env.values()
+        differ = [n for n in sorted(current) if abs(donor[n] - current[n]) > 1e-3]
+        names = rng.sample(differ, min(len(differ), rng.randint(*k)))
+        env.load_state(state)
+        env.apply({n: donor[n] for n in names})
+        if mss_distance(env.render(env.state), target) >= min_dist:
+            return Task("repair", env.state, REPAIR_INSTRUCTION, target_state=state, perturbed=names)
+    return None
 
 
 def make_match_task(env: VitalEnv, target_state: str) -> Task:

@@ -54,7 +54,8 @@ class OmniPolicy:
         tok = self.proc.tokenizer
         self.stop_ids = [tok.convert_tokens_to_ids("<|im_end|>")] + ([tok.eos_token_id] if tok.eos_token_id is not None else [])
         self.device = device or default_device()
-        self.model = getattr(T, model_cls).from_pretrained(self.path, dtype=dtype).to(self.device)
+        # Load straight onto the device: one CPU copy per rank would need hundreds of GB of RAM for 30B on 8 GPUs.
+        self.model = getattr(T, model_cls).from_pretrained(self.path, dtype=dtype, device_map=self.device)
         if hasattr(self.model, "visual"):
             self.model.visual = None
         self.model.eval()

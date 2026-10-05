@@ -8,7 +8,10 @@ MODEL=$1 RUN=$2 GPUS=$3 HOURS=$4 STEPS=$5
 shift 5
 PY=${PY:-.venv/bin/python}
 EVAL_N=${EVAL_N:-100}
-EVAL_RESERVE=${EVAL_RESERVE:-3600}  # seconds kept for the final benchmark
+EVAL_RESERVE=${EVAL_RESERVE:-5400}  # seconds kept for the final benchmark
+# Fewer out-of-memory errors from fragmentation while sequence lengths vary
+command -v nvidia-smi >/dev/null && [ -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ] \
+  && export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True}
 if [ "$GPUS" -gt 1 ]; then
   LAUNCH=("$PY" -m torch.distributed.run --standalone --nproc_per_node "$GPUS")
 else

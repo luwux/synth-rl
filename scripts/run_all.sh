@@ -10,7 +10,8 @@
 #   --model ID         Hugging Face model id (default Qwen/Qwen2.5-Omni-7B)
 #   --gpus N           GPUs to train on (default: all visible; CUDA_VISIBLE_DEVICES=0,1,2,3 selects cards,
 #                      so two runs can share a machine)
-#   --hours H          wall-time budget for training and evaluation (default 20)
+#   --hours H          wall-time budget for the whole run from now: install, download, checks, training,
+#                      and the final benchmark (default 20)
 #   --steps N          maximum GRPO steps (default 400)
 #   --name NAME        run folder under runs/ (default: <model>-<date>)
 #   --skip-preflight   go straight to training
@@ -48,6 +49,9 @@ fi
 NAME=${NAME:-$(basename "$MODEL")-$(date +%Y%m%d-%H%M)}
 RUN=runs/$NAME
 mkdir -p "$RUN"
+# scripts/train.sh keeps this deadline across restarts
+[ -f "$RUN/deadline" ] || python3 -c "import sys, time; print(int(time.time() + float(sys.argv[1]) * 3600))" \
+  "$HOURS" > "$RUN/deadline"
 step() { echo; echo "== $* ($(date +%H:%M:%S))"; }
 
 # Behind a restricted network, switch to mirrors unless an index or endpoint was chosen already.
@@ -114,4 +118,5 @@ else
   echo "  results:   $RUN/results.tar.gz when finished"
   echo "  resume after a crash or reboot: scripts/train.sh ${cmd[*]:1}"
   echo "  diagnose a failure: scripts/doctor.sh $RUN"
+  echo "  stop (the restart loop first, then its processes): pkill -f \"train.sh .*$RUN \"; pkill -f $RUN/"
 fi
