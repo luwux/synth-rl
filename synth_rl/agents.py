@@ -1,4 +1,4 @@
-"""Agents that propose parameter edits: a keyword rule baseline and a Gemini audio-LLM agent."""
+"""Agents that propose parameter edits: a keyword rule baseline, Gemini, and OpenAI-compatible chat endpoints."""
 
 from __future__ import annotations
 
@@ -7,33 +7,40 @@ import io
 import json
 import os
 import re
+import urllib.error
 import urllib.request
+from typing import NamedTuple
 
 import numpy as np
 import soundfile as sf
 
-from .vital_env import SR
+from .units import unit_of
+from .vital_env import EDITABLE, LEGACY_DEPTH, SR, from_unit, to_unit, unit_range
 
 SYSTEM = """You are a sound designer operating the Vital wavetable synthesizer.
-You receive the current parameters (normalized 0-1 values plus Vital's display text) and audio of the current sound
-(one held middle-C note, 1.5 s held, 3 s total). Listen to the audio before deciding.
-Reply with JSON only: {"edits": {"<param>": <new normalized value>, ...}, "reason": "<one sentence>"}.
-Only use parameter names from the list. Change as few parameters as needed. Switches are 0 (off) or 1 (on)."""
+You receive the parameters you can set, each with its current value, its unit and allowed range, and what it does,
+plus audio of the current sound (one held middle-C note, 261.6 Hz: 1.5 s held, 3 s total). Listen to the audio
+before deciding.
+Reply with JSON only: {"edits": {"<parameter>": <new value>, ...}, "reason": "<one sentence>"}.
+Give each value as a number in the unit listed for that parameter (Hz, s, dB, %, voices); switches take "on" or
+"off". Values outside the range are clipped to it. Only use parameter names from the list, and change as few
+parameters as needed."""
 
 
 def prompt_text(params: dict, instruction: str) -> str:
-    """User-turn text shared by evaluation agents and exported RL prompts. Parameters whose value is None
-    (see `hide_values`) are listed without their current setting."""
+    """User-turn text shared by evaluation agents and exported RL prompts: one line per parameter with its value
+    in units, its range, and its description. Parameters whose value is hidden (see `hide_values`) show "?"."""
     hidden = any(v["value"] is None for v in params.values())
-    listing = "\n".join(f"- {k} — {v['desc']}" if v["value"] is None else f"- {k}: {v['value']} ({v['display']}) — {v['desc']}"
+    listing = "\n".join(f"- {k}: {'?' if v['value'] is None else v['text']} ({v['range']}) — {v['desc']}"
                          for k, v in params.items())
     note = "\n(Current values are hidden: judge them by listening.)" if hidden else ""
     return f"Parameters:\n{listing}{note}\n\nInstruction: {instruction}\n\nFirst clip: current sound."
 
 
 def hide_values(params: dict) -> dict:
-    """Blind-knob variant: the agent sees parameter names but must infer their settings from the audio."""
-    return {k: {**v, "value": None, "display": ""} for k, v in params.items()}
+    """Blind-knob variant: the agent sees parameter names, units, and ranges but must infer the settings from
+    the audio."""
+    return {k: {**v, "value": None, "text": "", "display": ""} for k, v in params.items()}
 
 
 def wav_b64(audio: np.ndarray) -> str:
@@ -56,18 +63,57 @@ def first_json(text: str) -> dict | None:
     return None
 
 
-def parse_edits(text: str) -> dict[str, float]:
+class Reply(NamedTuple):
+    edits: dict[str, float]  # 0-1 positions to apply
+    clipped: list[str]  # names whose value lay outside its range
+    readable: int  # edits that could be read, including ones that restate the current value
+
+
+def read_reply(text: str, params: dict | None = None) -> Reply:
+    """The edits of a reply as 0-1 positions.
+
+    Values are read in each parameter's unit. With `params` (the listing the reply answered), a value that reads
+    the same as the current one is dropped, so a reply that restates the whole patch changes only what it changed.
+    The edits sit under "edits" (one-shot replies) or "set" (steps of `loop`). Unknown names and unreadable values
+    are dropped; the pre-2026-11-16 depth name passes through as a position."""
     data = first_json(text)
-    if data is None:
-        return {}
-    edits = data.get("edits", data)
-    out = {}
-    for k, v in edits.items() if isinstance(edits, dict) else []:
-        try:
-            out[str(k)] = float(v)
-        except (TypeError, ValueError):
+    edits = data.get("edits", data.get("set", data)) if data is not None else None
+    out, clipped, readable = {}, [], 0
+    for name, given in edits.items() if isinstance(edits, dict) else []:
+        name = str(name)
+        if name == LEGACY_DEPTH:
+            try:
+                out[name] = float(given)
+                readable += 1
+            except (TypeError, ValueError):
+                pass
             continue
-    return out
+        value = unit_of(name).read(given) if name in EDITABLE else None
+        if value is None:
+            continue
+        readable += 1
+        position = from_unit(name, value)
+        shown = (params or {}).get(name, {}).get("text")
+        if shown and unit_of(name).text(to_unit(name, position)) == shown:
+            continue
+        low, high = unit_range(name)  # the listed range is rounded, so allow that much
+        if unit_of(name).unit and not low - 0.005 * abs(low) - 1e-4 <= value <= high + 0.005 * abs(high) + 1e-4:
+            clipped.append(name)
+        out[name] = position
+    return Reply(out, clipped, readable)
+
+
+def parse_edits(text: str, params: dict | None = None) -> dict[str, float] | None:
+    """The edits to apply, or None when the reply holds no readable edit (a format failure). A reply that only
+    restates current values is valid and gives {}."""
+    reply = read_reply(text, params)
+    return reply.edits if reply.readable else None
+
+
+def reply_text(edits: dict[str, float], reason: str = "") -> str:
+    """The reply that asks for these 0-1 positions, written as an agent writes it (values with units)."""
+    return json.dumps({"edits": {k: unit_of(k).text(to_unit(k, v)) for k, v in edits.items() if k in EDITABLE},
+                       "reason": reason})
 
 
 class RuleAgent:
@@ -141,4 +187,76 @@ class GeminiAgent:
             data = json.loads(resp.read())
         text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         reason = (first_json(text) or {}).get("reason", "")
-        return {"edits": parse_edits(text), "reason": str(reason), "raw": text}
+        reply = read_reply(text, params)
+        return {"edits": reply.edits, "clipped": reply.clipped, "valid": bool(reply.readable), "reason": str(reason),
+                "raw": text}
+
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
+
+class OpenAIChatAgent:
+    """Any OpenAI-compatible chat-completions endpoint that accepts `input_audio` parts: OpenRouter by default,
+    or a local server such as llama-server (`base_url="http://127.0.0.1:8080/v1"`, no key needed).
+
+    `options` is merged into the request body; the default turns reasoning off and caps the reply, which keeps
+    a three-line JSON answer from costing a long hidden chain of thought."""
+
+    DEFAULT_OPTIONS = {"reasoning": {"enabled": False}, "max_tokens": 1024}
+
+    def __init__(self, model: str, base_url: str = OPENROUTER_URL, key_env: str = "OPENROUTER_API_KEY",
+                 mute_audio: bool = False, temperature: float = 0.7, options: dict | None = None,
+                 timeout: float = 120, label: str = ""):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.mute_audio = mute_audio
+        self.temperature = temperature
+        self.options = dict(self.DEFAULT_OPTIONS if options is None else options)
+        self.timeout = timeout
+        self.key = os.environ.get(key_env, "") if key_env else ""
+        if self.base_url == OPENROUTER_URL and not self.key:
+            raise RuntimeError(f"{key_env} is not set")
+        self.name = f"{label or model}{'+mute' if mute_audio else ''}"
+        self.last_usage: dict = {}
+
+    def _audio_part(self, audio: np.ndarray) -> dict:
+        if self.mute_audio:
+            audio = np.zeros_like(audio)
+        return {"type": "input_audio", "input_audio": {"data": wav_b64(audio), "format": "wav"}}
+
+    def complete(self, messages: list[dict]) -> str:
+        """The model's reply to a conversation. Content parts {"type": "audio", "audio": <array>} are sent as WAV
+        (as silence when this agent is muted)."""
+        sent = [{"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else
+                 [self._audio_part(p["audio"]) if p["type"] == "audio" else p for p in m["content"]]} for m in messages]
+        body = {"model": self.model, "temperature": self.temperature, "messages": sent, **self.options}
+        headers = {"Content-Type": "application/json"}
+        if self.key:
+            headers["Authorization"] = "Bearer " + self.key
+        req = urllib.request.Request(f"{self.base_url}/chat/completions", data=json.dumps(body).encode(),
+                                     headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:  # the body names the problem (credits, model id); it never has the key
+            detail = e.read()[:300].decode("utf-8", "replace")
+            raise RuntimeError(f"{self.model}: HTTP {e.code} {detail}") from None
+        if "choices" not in data:
+            raise RuntimeError(f"{self.model}: no choices in reply: {json.dumps(data)[:300]}")
+        self.last_usage = data.get("usage") or {}
+        choice = data["choices"][0]
+        text = choice["message"].get("content") or ""
+        if not text.strip() or (choice.get("finish_reason") == "length" and first_json(text) is None):
+            raise RuntimeError(f"{self.model}: reply cut off or empty (finish_reason {choice.get('finish_reason')})")
+        return text
+
+    def propose(self, instruction: str, params: dict, audio: np.ndarray, target: np.ndarray | None = None) -> dict:
+        content = [{"type": "text", "text": prompt_text(params, instruction)}, {"type": "audio", "audio": audio}]
+        if target is not None:
+            content.append({"type": "text", "text": "Second clip: target sound."})
+            content.append({"type": "audio", "audio": target})
+        text = self.complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": content}])
+        reason = (first_json(text) or {}).get("reason", "")
+        reply = read_reply(text, params)
+        return {"edits": reply.edits, "clipped": reply.clipped, "valid": bool(reply.readable), "reason": str(reason),
+                "raw": text}

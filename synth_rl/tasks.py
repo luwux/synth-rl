@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .features import describe, mss_distance
-from .vital_env import EDITABLE, VitalEnv
+from .vital_env import VitalEnv, moved
 
 # Change of one unit on this scale counts as a clearly audible step.
 SCALE = {
@@ -165,10 +165,9 @@ def repair_reward(before_dist: float, after_dist: float) -> dict[str, float]:
 
 def changed_params(env: VitalEnv, a: str, b: str, tol: float = 1e-3) -> list[str]:
     env.load_state(a)
-    pa = env.params()
+    before = env.values()
     env.load_state(b)
-    pb = env.params()
-    return [k for k in EDITABLE if abs(pa[k]["value"] - pb[k]["value"]) > tol]
+    return moved(before, env.values(), tol)
 
 
 def mean_describe(env: VitalEnv, state: str, renders: int) -> dict[str, float]:

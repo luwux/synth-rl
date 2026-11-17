@@ -3,7 +3,8 @@
 1. render: procedural patches render, render identically twice, and can be rebuilt exactly from the init patch
    through the editable parameters (so every match target is reachable)
 2. reward: no edit scores exactly 0, unparseable output scores FORMAT_FAIL, the keyword baseline scores
-   clearly above 0, and reward worker processes agree with the main process
+   clearly above 0, reward worker processes agree with the main process, and a step of the step loop scores
+   as the same reply does one-shot
 3. model: the policy loads and its greedy replies parse as edits
 4. training: two GRPO steps (on every GPU when --gpus > 1), checkpoint, resume for a third step,
    and benchmark the saved LoRA adapter
@@ -24,10 +25,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .agents import RuleAgent
+from .agents import RuleAgent, reply_text
+from .loop import Episode
 from .procedural import random_patch
 from .rl import FORMAT_FAIL, reward_from_row
-from .tasks import MONO_SPECS, make_edit_task, make_match_task, score
+from .tasks import MONO_SPECS, Task, make_edit_task, make_match_task, score
 from .vital_env import VitalEnv
 
 results: list[tuple[str, bool, str]] = []
@@ -81,11 +83,24 @@ def check_env() -> list:
         env.load_state(t.state)
         edits = rule.propose(t.instruction, env.params(), None)["edits"]
         items.append(({"kind": "edit", "state": t.state, "instruction": t.instruction, "spec_id": t.spec_id},
-                      json.dumps({"edits": edits})))
+                      reply_text(edits)))
     with mp.get_context("spawn").Pool(2) as pool:
         remote = pool.map(_row_reward, items)
     local = [reward_from_row(*it) for it in items]
     check("reward: worker processes agree", np.allclose(remote, local), f"{np.round(remote, 3).tolist()}")
+
+    gaps, stops = [], set()
+    for (row, reply), reward in zip(items, local):
+        episode = Episode(env, Task(**row))
+        for text in (reply, '{"done": true}'):
+            if not episode.done:
+                episode.step(text)
+        record = episode.record()
+        json.dumps(record)
+        gaps.append(abs(record["reward"] - reward))
+        stops.add(record["stopped"])
+    check("loop: a step scores as the same reply does one-shot, and done ends the episode",
+          max(gaps) < 1e-9 and stops <= {"done", "no change"}, f"max reward gap {max(gaps):.1e}; stops {sorted(stops)}")
     return tasks
 
 
@@ -100,7 +115,7 @@ def check_model(model: str, tasks: list) -> None:
     for t in tasks[:4]:
         env.load_state(t.state)
         out = agent.propose(t.instruction, env.params(), env.render(t.state))
-        parsed += bool(out["edits"])
+        parsed += bool(out.get("valid", out["edits"]))
     check("model: replies parse as edits", parsed >= 2, f"{parsed}/4 parsed; last reply: {out['raw'][:120]!r}")
     del agent
     gc.collect()

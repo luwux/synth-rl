@@ -15,18 +15,33 @@ import soundfile as sf
 
 from .agents import SYSTEM, GeminiAgent, RuleAgent, hide_values, prompt_text
 from .features import describe
+from .loop import rollout
 from .procedural import init_patch, random_patch
 from .tasks import (EDIT_SPECS, MATCH_INSTRUCTION, MONO_SPECS, REPAIR_INSTRUCTION, Task, changed_params,
                     make_edit_task, make_match_task, make_repair_task, score_against_audio, score_state)
-from .vital_env import SR, VitalEnv, list_presets, load_audio, preset_name
+from .vital_env import SR, VitalEnv, list_presets, load_audio, preset_name, preset_file
 
 DEFAULT_PRESETS = "procedural"
 
 
 def make_agent(name: str, mute_audio: bool):
-    """'rule', a Qwen Omni folder or Hugging Face id (optionally '<model>::<lora_adapter>'), or a Gemini model id."""
+    """'rule', 'openrouter:<model id>[+think]', 'openai:<base url>[::<model>]' (OpenAI-compatible server such as
+    llama-server; key from OPENAI_API_KEY if set), a Qwen Omni folder or Hugging Face id (optionally
+    '<model>::<lora_adapter>'), or a Gemini model id."""
     if name == "rule":
         return RuleAgent()
+    if name.startswith("openrouter:"):
+        from .agents import OpenAIChatAgent
+
+        model = name.removeprefix("openrouter:")  # a trailing "+think" leaves the model's reasoning on (slower)
+        return OpenAIChatAgent(model.removesuffix("+think"), mute_audio=mute_audio, label=name,
+                               options={"max_tokens": 8000} if model.endswith("+think") else None)
+    if name.startswith("openai:"):
+        from .agents import OpenAIChatAgent
+
+        url, _, model = name.removeprefix("openai:").partition("::")
+        return OpenAIChatAgent(model or "local", base_url=url, key_env="OPENAI_API_KEY", mute_audio=mute_audio,
+                               label=name)
     path, _, adapter = name.partition("::")
     if not Path(path).expanduser().exists() and "omni" in path.lower() and "/" in path:
         from huggingface_hub import snapshot_download
@@ -117,6 +132,7 @@ def run_episode(env: VitalEnv, agent, task: Task, rounds: int = 1, out_dir: Path
                        "from_norm": params[k]["value"], "to_norm": new_params[k]["value"]} for k in applied}
         turns.append({"prompt": prompt_text(shown, task.instruction), "raw": proposal.get("raw", ""),
                       "edits": {k: proposal["edits"][k] for k in applied}, "changes": changes,
+                      "clipped": proposal.get("clipped", []),
                       "reason": proposal.get("reason", "")})
     if task.kind == "edit" and not task.spec_id:
         result = {"n_changed": len(changed_params(env, task.state, state))}
@@ -128,7 +144,7 @@ def run_episode(env: VitalEnv, agent, task: Task, rounds: int = 1, out_dir: Path
         sf.write(out_dir / "final.wav", env.render(state).T, SR)
         if target_audio is not None:
             sf.write(out_dir / "target.wav", target_audio.T, SR)
-        (out_dir / "final.vital").write_text(state)
+        (out_dir / "final.vital").write_text(preset_file(state))
     return {"turns": turns, **result}
 
 
@@ -195,14 +211,20 @@ def cmd_bench(args) -> None:
         t_load = time.time()
         agent = make_agent(name, args.mute_audio)
         print(f"loaded {agent.name} in {time.time() - t_load:.1f}s")
+        if args.steps and not hasattr(agent, "complete"):
+            raise SystemExit(f"{agent.name} cannot hold a conversation, so it cannot run the step loop (--steps)")
         with results.open("a") as log:
             for i, task in enumerate(tasks):
                 t0 = time.time()
                 try:
-                    res = run_episode(env, agent, task, args.rounds, renders=renders, blind=args.blind)
+                    if args.steps:
+                        res = rollout(agent, env, task, args.steps, args.blind, renders=renders)
+                    else:
+                        res = run_episode(env, agent, task, args.rounds, renders=renders, blind=args.blind)
                 except Exception as e:  # keep the benchmark running past API or generation errors
                     res = {"reward": float("nan"), "error": repr(e)}
-                row = {"i": i, "agent": agent.name + ("+blind" if args.blind else ""), "rounds": args.rounds, "kind": task.kind, "spec": task.spec_id,
+                label = agent.name + ("+blind" if args.blind else "") + (f"+loop{args.steps}" if args.steps else "")
+                row = {"i": i, "agent": label, "rounds": args.rounds, "kind": task.kind, "spec": task.spec_id,
                        "instruction": task.instruction, "preset": preset_name(task.state),
                        "secs": round(time.time() - t0, 2), **res}
                 log.write(json.dumps(row) + "\n")
@@ -353,6 +375,9 @@ def main() -> None:
     b.add_argument("--n", type=int, default=20)
     b.add_argument("--tasks", help="task file to reuse (default: <out>/tasks.jsonl, created if missing)")
     b.add_argument("--rounds", type=int, default=1)
+    b.add_argument("--steps", type=int, default=0,
+                   help="step loop instead of one-shot replies: the agent sets parameters, hears the result, and "
+                        "goes on for at most this many steps or until it says done (see synth_rl/loop.py)")
     b.add_argument("--renders", type=int, default=0, help="renders averaged per score (default 1 procedural, 3 presets)")
     b.add_argument("--mute-audio", action="store_true", help="send silence instead of the render")
     b.add_argument("--blind", action="store_true", help="hide current parameter values; the agent must listen")

@@ -2,8 +2,8 @@
 
 Each exported task row (see `synth-rl export`) carries the starting preset state and task metadata.
 A completion is parsed as JSON edits, applied to that state, rendered, and scored. Completions
-without any valid edit get -3: edit rewards are bounded below by about -2.4 (target -1, drift -0.5,
-loudness -0.3, sparsity -0.64 for all 36 parameters) and repair and match rewards by -1, so format
+without any readable edit get -3 (one that only restates current values is valid and scores as no change): edit rewards are bounded below by about -2.4 (target -1, drift -0.5,
+loudness -0.3, sparsity -0.66 for all 37 parameters) and repair and match rewards by -1, so format
 failures rank below every real attempt.
 """
 
@@ -13,7 +13,7 @@ import json
 
 from .agents import parse_edits
 from .tasks import Task, score
-from .vital_env import EDITABLE, VitalEnv
+from .vital_env import VitalEnv
 
 FORMAT_FAIL = -3.0
 _env: VitalEnv | None = None
@@ -28,12 +28,14 @@ def _get_env() -> VitalEnv:
 
 
 def reward_from_row(row: dict, completion: str) -> float:
-    edits = {k: v for k, v in parse_edits(completion).items() if k in EDITABLE}
-    if not edits:
+    env = _get_env()
+    env.load_state(row["state"])
+    edits = parse_edits(completion, env.params())
+    if edits is None:
         return FORMAT_FAIL
     task = Task(row["kind"], row["state"], row["instruction"], spec_id=row.get("spec_id", ""),
                 target_state=row.get("target_state", ""))
-    return float(score(_get_env(), task, edits)["reward"])
+    return float(score(env, task, edits)["reward"])
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None) -> float:

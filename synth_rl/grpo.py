@@ -33,7 +33,7 @@ from .omni import OmniPolicy, to_model_audio
 from .procedural import random_patch
 from .rl import FORMAT_FAIL
 from .tasks import EDIT_SPECS, MONO_SPECS, Task, make_edit_task, make_match_task, make_repair_task, score
-from .vital_env import EDITABLE, VitalEnv
+from .vital_env import VitalEnv
 
 LORA_TARGETS = r".*model\.layers\.\d+\.(self_attn\.(q|k|v|o)_proj|mlp\.(gate|up|down)_proj)"
 
@@ -71,8 +71,9 @@ def _init_worker() -> None:
 
 def _score(item: tuple[dict, str]) -> dict:
     task_dict, text = item
-    edits = {k: v for k, v in parse_edits(text).items() if k in EDITABLE}
-    if not edits:
+    _worker_env.load_state(task_dict["state"])
+    edits = parse_edits(text, _worker_env.params())
+    if edits is None:
         return {"reward": FORMAT_FAIL, "valid": False, "n_changed": 0}
     out = score(_worker_env, Task(**task_dict), edits)
     return {"reward": float(out["reward"]), "valid": True, "n_changed": int(out["n_changed"])}

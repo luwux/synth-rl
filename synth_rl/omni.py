@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from scipy.signal import resample_poly
 
-from .agents import SYSTEM, first_json, parse_edits, prompt_text
+from .agents import SYSTEM, first_json, prompt_text, read_reply
 from .vital_env import RENDER_DUR, SR
 
 OMNI_SR = 16000
@@ -85,6 +85,19 @@ class OmniPolicy:
                 {"role": "user", "content": content}]
         return self.proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
 
+    def chat_messages(self, messages: list[dict]) -> tuple[str, list[np.ndarray]]:
+        """A conversation in the message format of `loop` as prompt text, plus its clips in prompt order."""
+        msgs, clips = [], []
+        for m in messages:
+            content = []
+            for part in [{"type": "text", "text": m["content"]}] if isinstance(m["content"], str) else m["content"]:
+                if part["type"] == "audio":
+                    clips.append(part["audio"])
+                    part = {"type": "audio", "audio": f"clip{len(clips)}.wav"}
+                content.append(part)
+            msgs.append({"role": m["role"], "content": content})
+        return self.proc.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False), clips
+
     def encode(self, texts: list[str], audios: list[np.ndarray]):
         """`audios` is the flat list of every clip, in prompt order. Padding stops at the clip length."""
         inp = self.proc(text=texts, audio=audios, sampling_rate=OMNI_SR, return_tensors="pt", padding=True,
@@ -129,4 +142,12 @@ class OmniAgent:
         text = self.policy.chat(prompt_text(params, instruction), len(clips))
         out, _, _ = self.policy.generate([text], [to_model_audio(c) for c in clips], sample=False)
         reason = (first_json(out[0]) or {}).get("reason", "")
-        return {"edits": parse_edits(out[0]), "reason": str(reason), "raw": out[0]}
+        reply = read_reply(out[0], params)
+        return {"edits": reply.edits, "clipped": reply.clipped, "valid": bool(reply.readable), "reason": str(reason),
+                "raw": out[0]}
+
+    def complete(self, messages: list[dict]) -> str:
+        """The reply to a conversation of `loop` (greedy decoding)."""
+        text, clips = self.policy.chat_messages(messages)
+        clips = [np.zeros_like(c) if self.mute_audio else c for c in clips]
+        return self.policy.generate([text], [to_model_audio(c) for c in clips], sample=False)[0][0]

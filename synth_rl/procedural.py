@@ -1,9 +1,13 @@
 """Procedurally generated Vital patches, so tasks need no third-party preset library.
 
-Patches start from the init patch (Vital's init preset with an envelope-2-to-cutoff routing at zero amount) and
-randomize only editable parameters: oscillators, filter, envelopes, the filter envelope amount, and effects. So any
-generated patch can be rebuilt from the init patch through the agent's action space. Silent or clipping patches
-are resampled.
+Patches start from the init patch and randomize only editable parameters: oscillators, filter, envelopes, the filter
+envelope amount, and effects. So any generated patch can be rebuilt from the init patch through the agent's action
+space. Silent or clipping patches are resampled.
+
+The init patch is Vital's init preset with three changes, none of which alters its sound: an envelope-2-to-cutoff
+routing at zero amount; the shapes wavetable on oscillators 1 and 2, positioned on the saw (the init preset's
+one-frame table leaves the wavetable position knobs without effect); and oscillator 2 routed into filter 1 like
+oscillator 1 (the preset sends it to filter 2, which is off, so the filter controls would miss it).
 """
 
 from __future__ import annotations
@@ -13,17 +17,27 @@ import random
 
 import numpy as np
 
-from .vital_env import FILTER_ENV, VitalEnv, fixed_phase
+from .vital_env import CUTOFF, FILTER_ENV, VitalEnv, fixed_phase, read_normalized, write_normalized
+from .wavetable import use_shapes
 
 
 def _unison(voices: int) -> float:
     return (voices - 1) / 15
 
 
+def _load_base(synth) -> None:
+    """The part of every generated patch that agents cannot edit; see the module docstring."""
+    synth.load_init_preset()
+    synth.connect_modulation(*FILTER_ENV)
+    data = json.loads(synth.to_json())
+    use_shapes(data)
+    data["settings"]["osc_2_destination"] = data["settings"]["osc_1_destination"]
+    synth.load_json(json.dumps(data))
+
+
 def init_patch(env: VitalEnv) -> str:
     """Starting point for building a sound from scratch."""
-    env.synth.load_init_preset()
-    env.synth.connect_modulation(*FILTER_ENV)
+    _load_base(env.synth)
     data = json.loads(fixed_phase(env.synth.to_json()))
     data["preset_name"] = "init"
     env.load_state(json.dumps(data))
@@ -33,13 +47,12 @@ def init_patch(env: VitalEnv) -> str:
 def random_patch(env: VitalEnv, rng: random.Random, attempts: int = 10) -> str:
     for _ in range(attempts):
         synth = env.synth
-        synth.load_init_preset()
-        synth.connect_modulation(*FILTER_ENV)
+        _load_base(synth)
         c = synth.get_controls()
         u = rng.uniform
 
         def put(name: str, value: float) -> None:
-            c[name].set_normalized(float(np.clip(value, 0.0, 1.0)))
+            write_normalized(c[name], name, value)
 
         put("osc_1_level", u(0.5, 0.9))
         put("osc_1_wave_frame", u(0, 1))
@@ -63,8 +76,8 @@ def random_patch(env: VitalEnv, rng: random.Random, attempts: int = 10) -> str:
         put("env_2_attack", u(0, 0.3))
         put("env_2_decay", u(0.2, 0.7))
         put("env_2_sustain", u(0, 1))
-        if rng.random() < 0.5:
-            c["modulation_1_amount"].set_normalized(u(0.55, 0.8))
+        if rng.random() < 0.5:  # envelope 2 opens the filter by 0.1 to 0.6 of its range, as far as the range allows
+            c["modulation_1_amount"].set(min(2 * u(0.55, 0.8) - 1, 1.0 - read_normalized(c[CUTOFF], CUTOFF)))
         for fx, p, mix in (("chorus", 0.3, (0.2, 0.6)), ("reverb", 0.5, (0.1, 0.5)),
                            ("delay", 0.2, (0.1, 0.4)), ("distortion", 0.2, (0.3, 0.8))):
             if rng.random() < p:
@@ -75,6 +88,8 @@ def random_patch(env: VitalEnv, rng: random.Random, attempts: int = 10) -> str:
         if c["reverb_on"].value() > 0.5:
             put("reverb_decay_time", u(0.2, 0.7))
             put("reverb_size", u(0.3, 0.9))
+        if c["osc_2_on"].value() > 0.5:  # drawn last, so seeds keep the values they had before this was added
+            put("osc_2_unison_voices", _unison(rng.choice([1, 1, 2, 3, 5])))
 
         state = fixed_phase(synth.to_json())
         data = json.loads(state)

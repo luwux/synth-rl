@@ -46,9 +46,12 @@ Do not change rewards, task generation, or check thresholds to make a check pass
 
 ## Code map
 
-- `synth_rl/vital_env.py`: headless Vital, the 36 editable parameters, rendering.
+- `synth_rl/vital_env.py`: headless Vital, the 37 editable parameters, rendering.
+- `synth_rl/units.py`: the unit of each parameter (Hz, s, dB, %, voices) and how values are written and read.
 - `synth_rl/procedural.py`, `synth_rl/tasks.py`: generated patches, the edit, repair, and match tasks, and their rewards.
+- `synth_rl/wavetable.py`: the five-shape wavetable of generated patches and the text shown for its positions.
 - `synth_rl/agents.py`, `synth_rl/omni.py`: prompts, reply parsing, Gemini and local Qwen Omni agents.
+- `synth_rl/loop.py`: the step loop (`bench --steps N`, the demo's chat): one `set` tool, reset/step episodes with a reward per step, rollouts. One-shot replies stay the diagnostic setting; training on trajectories is not implemented.
 - `synth_rl/grpo.py`: GRPO with LoRA, single or multi GPU (torchrun).
 - `synth_rl/cli.py`: `edit`, `match`, `bench`, and the other commands.
 - `synth_rl/preflight.py`: the checks run before training; also the closest thing to a test suite.
