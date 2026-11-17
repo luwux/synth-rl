@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+/*
+ * Colours and proportions follow the default skin of the Vital synthesizer (default.vitalskin and
+ * src/interface/look_and_feel in github.com/mtytel/vital, GPL-3.0). Names in comments are the skin's.
+ */
+@theme {
+  --font-sans: "Lato", ui-sans-serif, system-ui, sans-serif;
+  --font-title: "Montserrat", "Lato", ui-sans-serif, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-bg: #262a2d; /* Background */
+  --color-body: #4c4f52; /* Body */
+  --color-heading: #3e4245; /* Body Heading Background */
+  --color-heading-text: #dfdfdf; /* Heading Text */
+  --color-text: #d3d6d6; /* Body Text */
+  --color-label: #3e4245; /* Label Background */
+  --color-widget: #1d2125; /* Widget Background */
+  --color-popup: #1d2125; /* Popup Background */
+  --color-selector: #14181b; /* Popup Selector Background (header) */
+  --color-field: #2c3033; /* Text Component Background */
+  --color-knob-body: #262a2e; /* Rotary Body */
+  --color-knob-border: #4c4f52; /* Rotary Body Border */
+  --color-track: #4c4f52; /* Rotary Arc Unselected */
+  --color-arc-off: #848789; /* Rotary Arc Disabled */
+  --color-power-off: #606265; /* Power Button Off */
+  --color-icon: #848789; /* Icon Button Off */
+  --color-icon-hover: #aaacad; /* Icon Button Off Hover */
+  --color-ui: #848789; /* UI Button */
+  --color-ui-hover: #939699;
+  --color-ui-text: #111111; /* UI Button Text */
+
+  --color-purple: #aa88ff; /* Rotary Arc, Widget Primary 1, UI Action Button */
+  --color-purple-hover: #bda3ff;
+  --color-purple-press: #906de9;
+  --color-teal: #1de9b6; /* Modulation Meter, Envelope Primary 1 */
+  --color-teal-light: #64ffda; /* Envelope Rotary Arc, Modulation Meter Control */
+  --color-blue: #40c4ff; /* Envelope Primary 2 */
+  --color-orange: #ffb74d; /* Filter */
+  --color-red: #ff5252; /* Distortion */
+  --color-pink: #ff99e9; /* Delay */
+  --color-periwinkle: #8fa0ff; /* Reverb */
+  --color-cream: #fff6e1; /* Equalizer */
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+:root {
+  color-scheme: dark;
+  --lighten: rgba(255, 255, 255, 0.133); /* Lighten Screen 22ffffff */
+  --overlay: rgba(0, 0, 0, 0.133); /* Overlay Screen 22000000 */
+  --shadow: rgba(0, 0, 0, 0.4); /* Shadow 66000000 */
+  --hairline: rgba(255, 255, 255, 0.03); /* Border 08ffffff */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-width: 1280px;
+  overflow: hidden;
+}
+
+button {
+  cursor: default;
+}
+
+::selection {
+  background: rgba(170, 171, 171, 0.24); /* Text Editor Selection */
+}
+
+/* Thin scrollbars like Vital's (Lighten Screen thumb, no track). */
+.vital-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* Press feedback for everything pressable. */
+.pressable {
+  transition:
+    transform 140ms var(--ease-out),
+    background-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+.pressable:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.enter-up {
+  animation: enter-up 260ms var(--ease-out) both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter-up {
+    animation: none;
+  }
+  .pressable:active:not(:disabled) {
+    transform: none;
+  }
+}

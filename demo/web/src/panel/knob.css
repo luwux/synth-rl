@@ -1,0 +1,80 @@
+/* Knob motion: stroke thickness on hover (Vital's 1.4x boost), and the glow of controls the last agent round moved. */
+
+.knob-stroke {
+  transition:
+    stroke-width 150ms ease,
+    stroke 200ms ease;
+}
+
+.knob-glow {
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+[data-glow="burst"] .knob-glow {
+  opacity: 0.95;
+  transition-duration: 120ms;
+}
+[data-glow="steady"] .knob-glow {
+  opacity: 0.42;
+  transition-duration: 1400ms;
+}
+
+.label-pill {
+  background: var(--color-label);
+  color: var(--color-text);
+  transition:
+    background-color 400ms ease,
+    color 400ms ease;
+}
+
+.ghost-tick {
+  animation: ghost-in 500ms ease-out both;
+}
+@keyframes ghost-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Vital's value popup appears instantly; only fade it in very briefly. */
+.vital-popup {
+  animation: popup-in 90ms ease-out;
+}
+@keyframes popup-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.vital-select {
+  transform-origin: var(--radix-select-content-transform-origin);
+  animation: select-in 150ms var(--ease-out);
+}
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knob-stroke,
+  .label-pill {
+    transition: none;
+  }
+}
+
+.power-glow {
+  animation: power-glow 1.6s ease-out both;
+}
+@keyframes power-glow {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}

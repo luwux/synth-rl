@@ -1,0 +1,47 @@
+{
+  "name": "synth-rl-demo-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "^0.15.36",
+    "@fontsource/lato": "^5.3.0",
+    "@fontsource/montserrat": "^5.3.0",
+    "@wavesurfer/react": "^1.0.14",
+    "eventsource-parser": "^4.1.3",
+    "lucide-react": "^1.73.0",
+    "motion": "^14.14.0",
+    "radix-ui": "^1.8.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-knob-headless": "^0.4.0",
+    "sonner": "^2.0.8",
+    "wavesurfer.js": "^8.1.0",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "react-knob-headless>react": "19",
+        "react-knob-headless>react-dom": "19"
+      }
+    }
+  }
+}
